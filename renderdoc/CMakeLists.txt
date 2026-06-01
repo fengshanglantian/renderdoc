@@ -664,6 +664,11 @@ endif()
 
 if(ANDROID)
     set(RDOC_LINK_FLAGS "-Wl,--undefined,force_include_libentry -Wl,--build-id")
+    # Force SONAME so dependents embed only the basename in DT_NEEDED (avoids
+    # `lib/libVkLayer_GLES_RenderDoc.so` showing up which Android dlopen rejects).
+    set(RDOC_LINK_FLAGS "${RDOC_LINK_FLAGS} -Wl,-soname,libVkLayer_GLES_RenderDoc.so")
+    # 16 KiB ELF page alignment for Android 15+/Pixel 9-class devices.
+    set(RDOC_LINK_FLAGS "${RDOC_LINK_FLAGS} -Wl,-z,max-page-size=16384")
     if(ENABLE_ASAN)
         set(RDOC_LINK_FLAGS "${RDOC_LINK_FLAGS} -fsanitize=address")
     endif()

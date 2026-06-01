@@ -29,6 +29,10 @@ elseif(ANDROID)
     include_directories(${ANDROID_NDK_ROOT_PATH}/sources/android/native_app_glue)
     list(APPEND libraries PRIVATE -llog -landroid)
     set(LINKER_FLAGS "-Wl,--no-as-needed")
+    # 16 KiB ELF page alignment for Android 15+/Pixel 9-class devices.
+    set(LINKER_FLAGS "${LINKER_FLAGS} -Wl,-z,max-page-size=16384")
+    # Force SONAME so the loader resolves by basename inside the APK lib dir.
+    set(LINKER_FLAGS "${LINKER_FLAGS} -Wl,-soname,librenderdoccmd.so")
 
     if(ENABLE_ASAN)
         set(LINKER_FLAGS "${LINKER_FLAGS} -fsanitize=address")
