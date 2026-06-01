@@ -4693,7 +4693,16 @@ void Debugger::RegisterOp(Iter it)
           // bit of a hack - only process declares/values for variables inside a scope that is
           // within that function. If we see a declare/value in another function we defer it hoping
           // that we will encounter a scope later that's valid for it.
-          const bool insideValidScope = m_DebugInfo.curScope->HasAncestor(varDeclScope);
+          //
+          // MARVEL: also defer when curScope is NULL — line 4866 explicitly clears curScope after
+          // every block terminator (OpBranch/OpKill/OpReturn/...). When dxc emits a DebugValue or
+          // DebugDeclare in the gap between a block terminator and the next OpDebugScope (observed
+          // with dxc 1.8.2403 NonSemantic.Shader.DebugInfo.100), the original code dereferenced
+          // NULL curScope here -> SIGSEGV at offset 0x8 (ScopeData::parent field).  The else
+          // branch below already pushes the mapping into pendingMappings, which is precisely the
+          // intended fallback per the comment above.
+          const bool insideValidScope = m_DebugInfo.curScope &&
+                                        m_DebugInfo.curScope->HasAncestor(varDeclScope);
 
           LocalMapping mapping = {curInstIndex, sourceVarId, debugVarId,
                                   dbg.inst == ShaderDbg::Declare};
