@@ -5296,11 +5296,25 @@ void VulkanReplay::RefreshDerivedReplacements()
   // we're iterating
   rdcarray<VkPipeline> deletequeue;
 
-  // remake and replace any pipelines that reference a replaced shader
+  // Phase 1: collect pipeline IDs to process.
+  //
+  // vkCreateGraphicsPipelines / vkCreateComputePipelines (called in Phase 2) insert new
+  // entries into m_Pipeline (std::unordered_map) via Pipeline::Init.  Inserting into an
+  // unordered_map can trigger a rehash which invalidates ALL iterators — iterating and
+  // inserting at the same time is undefined behaviour.  When multiple shader replacements
+  // are active simultaneously the loop creates 2+ pipelines per call, making rehash very
+  // likely and causing corrupted pipeline rebuilds that lead to VK_ERROR_DEVICE_LOST on
+  // the next replay.
+  //
+  // Fix: split into two phases.  Phase 1 only reads m_Pipeline (no insertions).  Phase 2
+  // iterates over the collected vector, so insertions into m_Pipeline are harmless.
+  // References to values inside std::unordered_map are never invalidated by insert, so
+  // looking up pipeline info by ID in Phase 2 is safe.
+  rdcarray<ResourceId> pipelineIDs;
+
   for(auto it = m_pDriver->m_CreationInfo.m_Pipeline.begin();
       it != m_pDriver->m_CreationInfo.m_Pipeline.end(); ++it)
   {
-    ResourceId pipesrcid = it->first;
     const VulkanCreationInfo::Pipeline &pipeInfo = it->second;
 
     // only for graphics pipelines
@@ -5318,11 +5332,18 @@ void VulkanReplay::RefreshDerivedReplacements()
       }
     }
 
-    ResourceId origsrcid = pipesrcid;
-
     // only look at pipelines from the capture, no replay-time programs.
-    if(ResourceIDGen::IsReplayOnlyID(pipesrcid))
+    if(ResourceIDGen::IsReplayOnlyID(it->first))
       continue;
+
+    pipelineIDs.push_back(it->first);
+  }
+
+  // Phase 2: remake and replace any pipelines that reference a replaced shader.
+  // Iterating over the collected vector; insertions into m_Pipeline are safe here.
+  for(ResourceId pipesrcid : pipelineIDs)
+  {
+    ResourceId origsrcid = pipesrcid;
 
     // if this pipeline has a replacement, remove it and delete the program generated for it
     if(rm->HasReplacement(origsrcid))
@@ -5332,10 +5353,18 @@ void VulkanReplay::RefreshDerivedReplacements()
       rm->RemoveReplacement(origsrcid);
     }
 
+    // look up pipeline info — the entry must still exist (we only collected non-replay IDs
+    // and nothing erases capture-time pipelines between phases).
+    auto it = m_pDriver->m_CreationInfo.m_Pipeline.find(pipesrcid);
+    if(it == m_pDriver->m_CreationInfo.m_Pipeline.end())
+      continue;
+
+    const VulkanCreationInfo::Pipeline &pipeInfo = it->second;
+
     bool usesReplacedShader = false;
-    for(size_t i = 0; i < ARRAY_COUNT(it->second.shaders); i++)
+    for(size_t i = 0; i < ARRAY_COUNT(pipeInfo.shaders); i++)
     {
-      if(rm->HasReplacement(it->second.shaders[i].module))
+      if(rm->HasReplacement(pipeInfo.shaders[i].module))
       {
         usesReplacedShader = true;
         break;
@@ -5351,7 +5380,7 @@ void VulkanReplay::RefreshDerivedReplacements()
       if(pipeInfo.graphicsPipe)
       {
         VkGraphicsPipelineCreateInfo pipeCreateInfo;
-        m_pDriver->GetShaderCache()->MakeGraphicsPipelineInfo(pipeCreateInfo, it->first);
+        m_pDriver->GetShaderCache()->MakeGraphicsPipelineInfo(pipeCreateInfo, pipesrcid);
 
         rdcarray<rdcstr> entrynames;
         entrynames.reserve(pipeCreateInfo.stageCount);
@@ -5411,7 +5440,7 @@ void VulkanReplay::RefreshDerivedReplacements()
       else
       {
         VkComputePipelineCreateInfo pipeCreateInfo;
-        m_pDriver->GetShaderCache()->MakeComputePipelineInfo(pipeCreateInfo, it->first);
+        m_pDriver->GetShaderCache()->MakeComputePipelineInfo(pipeCreateInfo, pipesrcid);
 
         // replace the module by going via the live ID to pick up any replacements
         VkPipelineShaderStageCreateInfo &sh = pipeCreateInfo.stage;
