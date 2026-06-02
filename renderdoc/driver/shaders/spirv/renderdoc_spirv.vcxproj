@@ -71,7 +71,7 @@
       <WarningLevel>Level3</WarningLevel>
       <TreatWarningAsError>true</TreatWarningAsError>
       <AdditionalOptions>/w44062 /w44840 %(AdditionalOptions)</AdditionalOptions>
-      <DisableSpecificWarnings>4100;4267;5030;4065</DisableSpecificWarnings>
+      <DisableSpecificWarnings>4100;4267;5030;4065;4819</DisableSpecificWarnings>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
