@@ -31,6 +31,7 @@ RDOC_DEBUG_CONFIG(
     bool, Vulkan_Debug_VerboseCommandRecording, false,
     "Add verbose logging around recording and submission of command buffers in vulkan.");
 RDOC_EXTERN_CONFIG(bool, Vulkan_Hack_DisableRPNormalisation);
+RDOC_EXTERN_CONFIG(bool, Vulkan_Hack_DisableUndefinedDiscardStamping);
 
 struct DescriptorTemplateRefs
 {
@@ -1101,9 +1102,12 @@ void WrappedVulkan::ApplyRPLoadDiscards(VkCommandBuffer commandBuffer, VkRect2D 
            renderArea.extent.width < RDCMAX(1U, imInfo.extent.width >> viewRange.baseMipLevel) ||
            renderArea.extent.height < RDCMAX(1U, imInfo.extent.height >> viewRange.baseMipLevel))
         {
-          GetDebugManager()->FillWithDiscardPattern(
-              commandBuffer, DiscardType::UndefinedTransition, image, initialLayout, viewRange,
-              {{0, 0}, {imInfo.extent.width, imInfo.extent.height}});
+          if(!Vulkan_Hack_DisableUndefinedDiscardStamping())
+          {
+            GetDebugManager()->FillWithDiscardPattern(
+                commandBuffer, DiscardType::UndefinedTransition, image, initialLayout, viewRange,
+                {{0, 0}, {imInfo.extent.width, imInfo.extent.height}});
+          }
         }
       }
 
@@ -4687,7 +4691,8 @@ bool WrappedVulkan::Serialise_vkCmdPipelineBarrier(
                                bufBarriers.data(), (uint32_t)imgBarriers.size(), imgBarriers.data());
 
       if(IsActiveReplaying(m_State) &&
-         m_ReplayOptions.optimisation != ReplayOptimisationLevel::Fastest)
+         m_ReplayOptions.optimisation != ReplayOptimisationLevel::Fastest &&
+         !Vulkan_Hack_DisableUndefinedDiscardStamping())
       {
         for(uint32_t i = 0; i < imageMemoryBarrierCount; i++)
         {
@@ -4967,7 +4972,8 @@ bool WrappedVulkan::Serialise_vkCmdPipelineBarrier2(SerialiserType &ser,
       ObjDisp(commandBuffer)->CmdPipelineBarrier2(Unwrap(commandBuffer), &UnwrappedDependencyInfo);
 
       if(IsActiveReplaying(m_State) &&
-         m_ReplayOptions.optimisation != ReplayOptimisationLevel::Fastest)
+         m_ReplayOptions.optimisation != ReplayOptimisationLevel::Fastest &&
+         !Vulkan_Hack_DisableUndefinedDiscardStamping())
       {
         for(uint32_t i = 0; i < DependencyInfo.imageMemoryBarrierCount; i++)
         {

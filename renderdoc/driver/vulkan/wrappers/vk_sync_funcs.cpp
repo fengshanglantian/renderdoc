@@ -25,6 +25,9 @@
 #include <limits.h>
 #include "../vk_core.h"
 #include "../vk_debug.h"
+#include "core/settings.h"
+
+RDOC_EXTERN_CONFIG(bool, Vulkan_Hack_DisableUndefinedDiscardStamping);
 
 /*
  * Events and fences need careful handling.
@@ -844,7 +847,8 @@ bool WrappedVulkan::Serialise_vkCmdWaitEvents(
                           memoryBarrierCount, pMemoryBarriers, (uint32_t)bufBarriers.size(),
                           bufBarriers.data(), (uint32_t)imgBarriers.size(), imgBarriers.data());
 
-      if(m_ReplayOptions.optimisation != ReplayOptimisationLevel::Fastest)
+      if(m_ReplayOptions.optimisation != ReplayOptimisationLevel::Fastest &&
+         !Vulkan_Hack_DisableUndefinedDiscardStamping())
       {
         for(uint32_t i = 0; i < imageMemoryBarrierCount; i++)
         {
@@ -1397,7 +1401,8 @@ bool WrappedVulkan::Serialise_vkCmdWaitEvents2(SerialiserType &ser, VkCommandBuf
         ObjDisp(commandBuffer)->CmdSetEvent2(Unwrap(commandBuffer), ev, &UnwrappedDependencyInfo);
         ObjDisp(commandBuffer)->CmdWaitEvents2(Unwrap(commandBuffer), 1, &ev, &UnwrappedDependencyInfo);
 
-        if(m_ReplayOptions.optimisation != ReplayOptimisationLevel::Fastest)
+        if(m_ReplayOptions.optimisation != ReplayOptimisationLevel::Fastest &&
+           !Vulkan_Hack_DisableUndefinedDiscardStamping())
         {
           for(uint32_t i = 0; i < depInfo.imageMemoryBarrierCount; i++)
           {
@@ -1508,7 +1513,8 @@ bool WrappedVulkan::Serialise_vkTransitionImageLayout(SerialiserType &ser, VkDev
         SanitiseReplayImageLayout(imgBarriers.back().newLayout);
 
         if(IsActiveReplaying(m_State) &&
-           m_ReplayOptions.optimisation != ReplayOptimisationLevel::Fastest)
+           m_ReplayOptions.optimisation != ReplayOptimisationLevel::Fastest &&
+           !Vulkan_Hack_DisableUndefinedDiscardStamping())
         {
           if(pTransitions[i].oldLayout == VK_IMAGE_LAYOUT_UNDEFINED)
           {

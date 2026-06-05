@@ -31,6 +31,14 @@ RDOC_CONFIG(
     bool, Vulkan_Hack_DisableRPNormalisation, false,
     "Disable default behaviour to normalise renderpasses to be more consistent and debuggable.");
 
+RDOC_CONFIG(
+    bool, Vulkan_Hack_DisableUndefinedDiscardStamping, true,
+    "Don't stamp the UNDEFINED IMG discard pattern on images transitioned from "
+    "VK_IMAGE_LAYOUT_UNDEFINED. Default true in this fork (engines such as UE issue UNDEFINED "
+    "transitions on persistent cubemaps/RTs whose contents are still valid from a prior frame, "
+    "and stamping destroys those contents at replay time). Set to false to restore upstream "
+    "behaviour for verification.");
+
 static void PatchSeparateStencil(VkAttachmentDescription &att, const VkAttachmentReference *ref)
 {
 }
