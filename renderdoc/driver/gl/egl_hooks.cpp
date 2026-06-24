@@ -33,6 +33,26 @@ RDOC_CONFIG(bool, Android_AllowAllEGLExtensions, false,
             "compatibility, but with this option that behaviour can be overridden and all "
             "extensions will be reported.");
 
+// NetEase / Marvel: on some Android 16 + vendor ROMs (e.g. HyperOS 3.0 on SM8750), forcing the
+// in-app capture library to hook EGL/GLES is the only path that triggers the PLT trampoline
+// rewrite in android_hook.cpp. On these devices the PLT trampoline self-recurses and overflows
+// the GameThread stack within ~60ms of vkCreateInstance, see
+// Engine/Extras/Android/RenderDoc/HANDOFF-2026-06-24-android16-marvel-plt-crash.md
+//
+// For projects that only need Vulkan capture, the safest workaround is to never register the
+// EGL/GLES hooks in the first place. With no library hooks registered, EndHookRegistration()
+// short-circuits at the "No library hooks registered, not doing any hooking" log and the PLT
+// rewrite path is skipped entirely. The Vulkan layer continues to work because it is wired up
+// through the standard Vulkan layer interface, not through PLT hooking.
+//
+// Default is true because every active consumer of this internal RenderDoc build is on Vulkan.
+// Flip to false in renderdoc.conf to restore upstream GLES capture behaviour.
+RDOC_CONFIG(bool, Android_DisableGLESCapture, true,
+            "Skip registration of all EGL and OpenGL ES hooks on Android. This avoids the "
+            "PLT trampoline rewrite path which is known to stack-overflow on Android 16 + "
+            "vendor ROMs (HyperOS 3.0 on SM8750 etc.). Vulkan capture is unaffected. Set to "
+            "false to restore upstream behaviour and re-enable GLES capture.");
+
 #if ENABLED(RDOC_POSIX)
 #include <dlfcn.h>
 
@@ -1045,6 +1065,18 @@ bool ShouldHookEGL()
 
 bool ShouldHookEGL()
 {
+  // NetEase / Marvel: skip EGL+GLES hooking entirely when requested via renderdoc.conf.
+  // This makes EGLHook::RegisterHooks() / GLHook::RegisterHooks() early-return, which keeps
+  // android_hook.cpp's library list empty and avoids the PLT trampoline rewrite that crashes on
+  // Android 16 / HyperOS 3.0. Vulkan capture is unaffected.
+  if(Android_DisableGLESCapture())
+  {
+    RDCLOG(
+        "Android_DisableGLESCapture=true (renderdoc.conf) - skipping EGL/GLES hooks entirely, "
+        "Vulkan-only capture mode. PLT hook path will be bypassed.");
+    return false;
+  }
+
   void *egl_handle = dlopen("libEGL.so", RTLD_LAZY);
   PFN_eglQueryString query_string = (PFN_eglQueryString)dlsym(egl_handle, "eglQueryString");
   if(!query_string)
@@ -1133,6 +1165,21 @@ typedef __eglMustCastToProperFunctionPointerType(EGLAPIENTRY *PFNEGLGETNEXTLAYER
 HOOK_EXPORT void AndroidGLESLayer_Initialize(void *layer_id,
                                              PFNEGLGETNEXTLAYERPROCADDRESSPROC next_gpa)
 {
+  // NetEase / Marvel: when GLES capture is disabled in renderdoc.conf, act as a no-op layer.
+  // Android still loads our .so via the official GLES Layer interface (driven by
+  // gpu_debug_layers_gles) even though ShouldHookEGL()=false made us skip our own hook
+  // registration. Without this early-out we'd still populate the GLES dispatch table and the
+  // "Capturing OpenGLES" overlay would appear. Returning here leaves our dispatch table empty
+  // so we never intercept GLES calls; AndroidGLESLayer_GetProcAddress below also bails out and
+  // returns `next` unmodified, so Android's GLES layer chain bypasses RenderDoc entirely.
+  if(Android_DisableGLESCapture())
+  {
+    RDCLOG(
+        "Android_DisableGLESCapture=true - AndroidGLESLayer_Initialize is a no-op, GLES layer "
+        "chain will pass through to the next layer without RenderDoc interception.");
+    return;
+  }
+
   RDCLOG("Initialising Android GLES layer with ID %p", layer_id);
 
   // as a hook callback this is only called while capturing
@@ -1156,6 +1203,14 @@ HOOK_EXPORT void AndroidGLESLayer_Initialize(void *layer_id,
 HOOK_EXPORT void *AndroidGLESLayer_GetProcAddress(const char *funcName,
                                                   __eglMustCastToProperFunctionPointerType next)
 {
+  // NetEase / Marvel: when GLES capture is disabled, return the next layer's procaddr unmodified
+  // so the Android GLES layer chain treats RenderDoc as a transparent pass-through. This kills
+  // the "Capturing OpenGLES" overlay and removes any RenderDoc overhead from EGL/GLES calls.
+  if(Android_DisableGLESCapture())
+  {
+    return (void *)next;
+  }
+
 // return our egl hooks
 #define GPA_FUNCTION(name, isext, replayrequired) \
   if(!strcmp(funcName, "egl" STRINGIZE(name)))    \
